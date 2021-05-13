@@ -34,6 +34,7 @@ THE SOFTWARE.
 #include "dummy_kernel/dummy_kernel.h"
 #include "simple_convolution/simple_convolution.h"
 #include "util/test_assert.h"
+#include <memory>
 
 // Dispatch callbacks and context handlers synchronization
 pthread_mutex_t mutex = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
@@ -170,21 +171,22 @@ int main() {
   if (HsaRsrcFactory::Instance().GetGpuAgentInfo(0, &agent_info) == false) abort();
 
   // Creating the queue
-  hsa_queue_t* queue = NULL;
-  if (HsaRsrcFactory::Instance().CreateQueue(agent_info, 128, &queue) == false) abort();
+  std::unique_ptr<hsa_queue_t, decltype(&hsa_queue_destroy)> queue(
+      HsaRsrcFactory::Instance().CreateQueue(agent_info, 128), &hsa_queue_destroy);
+  if (!queue) abort();
 
   // Test initialization
   TestHsa::HsaInstantiate();
 
-  for (unsigned ind = 0; ind < kiter; ++ind) {
+  for (unsigned ind = 0; ind < kiter && ret_val; ++ind) {
     printf("Iteration %u:\n", ind);
     if ((ind & 1) == 0) rocprofiler_start_queue_callbacks();
     else rocprofiler_stop_queue_callbacks();
-    ret_val = RunKernel<DummyKernel, TestAql>(0, NULL, agent_info, queue, diter);
-    if (ret_val) ret_val = RunKernel<SimpleConvolution, TestAql>(0, NULL, agent_info, queue, diter);
+    ret_val = RunKernel<DummyKernel, TestAql>(0, NULL, agent_info, queue.get(), diter);
+    if (ret_val) ret_val = RunKernel<SimpleConvolution, TestAql>(0, NULL, agent_info, queue.get(), diter);
   }
 
   TestHsa::HsaShutdown();
-
+  
   return (ret_val) ? 0 : 1;
 }

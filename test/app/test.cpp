@@ -30,10 +30,13 @@ THE SOFTWARE.
 #include "ctrl/test_aql.h"
 #include "dummy_kernel/dummy_kernel.h"
 #include "simple_convolution/simple_convolution.h"
+#include <future>
+#include <memory>
 
-void thread_fun(const int kiter, const int diter, const uint32_t agents_number) {
+bool thread_fun(const int kiter, const int diter, const uint32_t agents_number) {
+  bool result = true;
   const AgentInfo* agent_info[agents_number];
-  hsa_queue_t* queue[agents_number];
+  std::vector<std::unique_ptr<hsa_queue_t, decltype(&hsa_queue_destroy)>> queue;
   HsaRsrcFactory* rsrc = &HsaRsrcFactory::Instance();
 
   for (uint32_t n = 0; n < agents_number; ++n) {
@@ -42,25 +45,25 @@ void thread_fun(const int kiter, const int diter, const uint32_t agents_number) 
       fprintf(stderr, "AgentInfo failed\n");
       abort();
     }
-    if (rsrc->CreateQueue(agent_info[n], 128, &queue[n]) == false) {
+    queue.emplace_back(rsrc->CreateQueue(agent_info[n], 128), &hsa_queue_destroy);
+    if (!queue.back()) {
       fprintf(stderr, "CreateQueue failed\n");
       abort();
     }
   }
 
-  for (int i = 0; i < kiter; ++i) {
-    for (uint32_t n = 0; n < agents_number; ++n) {
+  for (int i = 0; i < kiter && result; ++i) {
+    for (uint32_t n = 0; n < agents_number && result; ++n) {
       // RunKernel<DummyKernel, TestAql>(0, NULL, agent_info[n], queue[n], diter);
-      RunKernel<SimpleConvolution, TestAql>(0, NULL, agent_info[n], queue[n], diter);
+      result &= RunKernel<SimpleConvolution, TestAql>(0, NULL, agent_info[n], queue[n].get(), diter);
     }
   }
 
-  for (uint32_t n = 0; n < agents_number; ++n) {
-    hsa_queue_destroy(queue[n]);
-  }
+  return result;
 }
 
 int main(int argc, char** argv) {
+  bool result = true;
   const char* kiter_s = getenv("ROCP_KITER");
   const char* diter_s = getenv("ROCP_DITER");
   const char* agents_s = getenv("ROCP_AGENTS");
@@ -73,14 +76,15 @@ int main(int argc, char** argv) {
 
   TestHsa::HsaInstantiate();
 
-  std::vector<std::thread> t(thrs);
+  std::vector<std::future<bool>> futures;
   for (int n = 0; n < thrs; ++n) {
-    t[n] = std::thread(thread_fun, kiter, diter, agents_number);
+    futures.emplace_back(std::async(thread_fun, kiter, diter, agents_number));
   }
-  for (int n = 0; n < thrs; ++n) {
-    t[n].join();
+  
+  for (auto &f : futures) {
+    result &= f.get();
   }
 
   TestHsa::HsaShutdown();
-  return 0;
+  return result ? 0 : 1;
 }

@@ -97,6 +97,7 @@ class TestHsa : public TestAql {
 
   // Handle of signal
   hsa_signal_t hsa_signal_;
+  bool signal_set_ = false;
 
   // Handle of Kernel Code Descriptor
   hsa_executable_symbol_t kernel_code_desc_;
@@ -114,13 +115,15 @@ class TestHsa : public TestAql {
 
   // Handle to an Hsa Queue
   hsa_queue_t* hsa_queue_;
-  bool my_queue_;
+  // Queue can be external or local, so need to handle ownership
+  bool my_queue_ = false;
 
   // Test kernel name
   std::string name_;
 
   // Kernel executable
   hsa_executable_t hsa_exec_;
+  bool executable_set_ = false;
 };
 
 #endif  // TEST_CTRL_TEST_HSA_H_

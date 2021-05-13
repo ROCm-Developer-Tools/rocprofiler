@@ -25,6 +25,7 @@ THE SOFTWARE.
 
 #include "ctrl/test_hsa.h"
 #include "util/test_assert.h"
+#include <memory>
 
 template <class Kernel, class Test> bool RunKernel(int argc = 0, char* argv[] = NULL, const AgentInfo* agent_info = NULL, hsa_queue_t* queue = NULL, int count = 1) {
   bool ret_val = false;
@@ -38,16 +39,22 @@ template <class Kernel, class Test> bool RunKernel(int argc = 0, char* argv[] = 
   TestHsa* test_hsa = new TestHsa(&test_kernel);
   test_hsa->SetAgentInfo(agent_info);
   test_hsa->SetQueue(queue);
+    
+  auto test_deleter = [](Test* test) {
+    test->Cleanup();  
+    delete test;
+  };
 
-  TestAql* test_aql = new Test(test_hsa);
+  std::unique_ptr<TestAql, decltype(test_deleter)> test_aql(
+      new Test(test_hsa), test_deleter);
   TEST_ASSERT(test_aql != NULL);
-  if (test_aql == NULL) return 1;
+
+  if (test_aql == NULL) return false;
 
   // Initialization of Hsa Runtime
   ret_val = test_aql->Initialize(argc, argv);
   if (ret_val == false) {
     std::cerr << "Error in the test initialization" << std::endl;
-    // TEST_ASSERT(ret_val);
     return false;
   }
 
@@ -59,6 +66,7 @@ template <class Kernel, class Test> bool RunKernel(int argc = 0, char* argv[] = 
     return false;
   }
 
+  bool result = true;
   // Kernel dspatch iterations
   for (int i = 0; i < count; ++i) {
     // Run test kernel
@@ -71,6 +79,7 @@ template <class Kernel, class Test> bool RunKernel(int argc = 0, char* argv[] = 
 
     // Verify the results of the execution
     ret_val = test_aql->VerifyResults();
+    result &= ret_val;
     if (ret_val) {
       std::clog << "Test : Passed" << std::endl;
     } else {
@@ -81,10 +90,7 @@ template <class Kernel, class Test> bool RunKernel(int argc = 0, char* argv[] = 
   // Print time taken by sample
   test_aql->PrintTime();
 
-  test_aql->Cleanup();
-  delete test_aql;
-
-  return ret_val;
+  return result;
 }
 
 #endif  // TEST_CTRL_RUN_KERNEL_H_
